@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NGC Group Access Manager</title>
+  <!-- Futura PT fallback via Jost (geometric sans-serif, closest freely available match) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ngc-black:   #00071d;   /* deepest navy — header bg */
+      --ngc-navy:    #001967;   /* dark navy — card headers, hover */
+      --ngc-blue:    #00249c;   /* primary NGC blue — buttons, links */
+      --ngc-sky:     #0098d5;   /* light blue accent */
+      --ngc-gray:    #e9ebed;   /* sidebar background */
+      --ngc-border:  #c9c9c9;   /* borders */
+      --ngc-text:    #1a1a1a;   /* body text */
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Jost', 'Futura PT', 'Helvetica Neue', Arial, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      color: #1F2937;
+    }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    header {
+      background: #00071d;
+      color: #fff;
+      height: 56px;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      z-index: 10;
+    }
+    .header-logo { display: flex; align-items: center; gap: 14px; }
+    .header-logo img { height: 28px; width: auto; }
+    .header-logo-divider { width: 1px; height: 24px; background: rgba(255,255,255,0.25); }
+    .header-logo-app { font-size: 13px; font-weight: 600; letter-spacing: 0.5px; color: rgba(255,255,255,0.85); text-transform: uppercase; }
+    .header-right { display: flex; align-items: center; gap: 14px; font-size: 13px; }
+    .header-user { opacity: 0.8; }
+    .logout-btn {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.25);
+      color: #fff;
+      padding: 4px 13px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    .logout-btn:hover { background: rgba(255,255,255,0.2); }
+
+    /* ── Root layout ─────────────────────────────────────────── */
+    .root-layout { display: flex; flex: 1; overflow: hidden; }
+
+    /* ════════════════════════════════════════════════════════════
+       LEFT PANEL — Auth & Token Log (1/3)
+    ════════════════════════════════════════════════════════════ */
+    .auth-log {
+      flex: 0 0 33%;   /* always exactly 1/3 — never grow or shrink */
+      min-width: 260px;
+      background: #00071d;
+      border-left: 1px solid #001550;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .auth-log-header {
+      background: #001020;
+      border-bottom: 1px solid #21262D;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .auth-log-header-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #8B949E;
+    }
+    .log-indicator {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #3FB950;
+      box-shadow: 0 0 6px #3FB950;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity: 1; } 50% { opacity: 0.4; }
+    }
+    .auth-log-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 10px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      scroll-behavior: smooth;
+    }
+    .auth-log-body::-webkit-scrollbar { width: 5px; }
+    .auth-log-body::-webkit-scrollbar-track { background: #00071d; }
+    .auth-log-body::-webkit-scrollbar-thumb { background: #30363D; border-radius: 3px; }
+
+    /* ── Log entry ── */
+    .log-entry {
+      background: #001020;
+      border: 1px solid #001550;
+      border-radius: 7px;
+      overflow: hidden;
+      font-size: 12px;
+    }
+    .log-entry-head {
+      padding: 6px 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #21262D;
+    }
+    .log-ts {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 10px;
+      color: #484F58;
+      flex-shrink: 0;
+    }
+    .log-badge {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      padding: 1px 7px;
+      border-radius: 3px;
+    }
+    .badge-auth    { background: #1C2D48; color: #58A6FF; border: 1px solid #1F6FEB44; }
+    .badge-api     { background: #2A1F0D; color: #E3B341; border: 1px solid #9E6A0344; }
+    .badge-mcp     { background: #1B2A1B; color: #3FB950; border: 1px solid #2EA04344; }
+    .badge-info    { background: #1C1C1C; color: #8B949E; border: 1px solid #30363D; }
+    .badge-error   { background: #2D0F0F; color: #F85149; border: 1px solid #F8514944; }
+
+    .log-entry-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+
+    .log-text {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 11px;
+      color: #8B949E;
+      line-height: 1.5;
+      word-break: break-all;
+    }
+    .log-text.highlight { color: #E6EDF3; }
+
+    /* ── Tool call list ── */
+    .tool-list { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+    .tool-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 11px;
+    }
+    .tool-arrow { color: #3FB950; font-weight: 700; }
+    .tool-name  { color: #79C0FF; }
+    .tool-time  { color: #484F58; margin-left: auto; }
+
+    /* ── Token blocks ── */
+    .token-block {
+      border-radius: 5px;
+      overflow: hidden;
+      margin-top: 2px;
+    }
+
+    /* ID Token — Blue */
+    .id-token-block {
+      background: #0D1F38;
+      border: 1px solid #1F6FEB55;
+      border-left: 3px solid #58A6FF;
+    }
+    .id-token-block .tb-header {
+      background: #112240;
+      padding: 5px 10px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      color: #79C0FF;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .id-token-block .tb-claims { padding: 7px 10px; display: flex; flex-direction: column; gap: 3px; }
+    .id-token-block .claim-key   { color: #58A6FF; }
+    .id-token-block .claim-val   { color: #CDD9E5; }
+
+    /* Access Token — Green */
+    .access-token-block {
+      background: #0D2318;
+      border: 1px solid #2EA04355;
+      border-left: 3px solid #3FB950;
+    }
+    .access-token-block .tb-header {
+      background: #0F2C1E;
+      padding: 5px 10px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      color: #56D364;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .access-token-block .tb-claims { padding: 7px 10px; display: flex; flex-direction: column; gap: 3px; }
+    .access-token-block .claim-key { color: #3FB950; }
+    .access-token-block .claim-val { color: #CDD9E5; }
+
+    /* Shared claim row */
+    .claim-row {
+      display: flex;
+      gap: 6px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      flex-wrap: wrap;
+    }
+    .claim-key { font-weight: 600; flex-shrink: 0; }
+    .claim-val { word-break: break-all; opacity: 0.9; }
+
+    /* JWT raw toggle */
+    .jwt-toggle {
+      margin-top: 4px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 10px;
+    }
+    .jwt-toggle summary {
+      cursor: pointer;
+      color: #484F58;
+      list-style: none;
+      padding: 2px 0;
+      user-select: none;
+    }
+    .jwt-toggle summary:hover { color: #8B949E; }
+    .jwt-raw {
+      color: #484F58;
+      word-break: break-all;
+      white-space: pre-wrap;
+      padding: 4px 0;
+      font-size: 9px;
+      line-height: 1.4;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       RIGHT PANEL — Group Management App (2/3)
+    ════════════════════════════════════════════════════════════ */
+    .app-wrapper {
+      flex: 1 1 67%;   /* takes the remaining 2/3 */
+      display: flex;
+      overflow: hidden;
+      background: #F4F6F8;
+      min-width: 0;    /* allow shrinking below content size */
+    }
+
+    /* Group cards sidebar */
+    .sidebar {
+      width: 34%;
+      min-width: 240px;
+      max-width: 340px;
+      background: #e9ebed;
+      border-right: 1px solid #c9c9c9;
+      overflow-y: auto;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .sidebar-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #6B7280;
+      padding: 0 2px;
+    }
+    .group-card {
+      background: #fff;
+      border-radius: 9px;
+      border: 1px solid #c9c9c9;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+      overflow: hidden;
+    }
+    .card-header {
+      background: #001967;
+      color: #fff;
+      padding: 9px 13px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .card-body {
+      padding: 11px 13px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+    .action-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      color: #6B7280;
+      margin-bottom: 4px;
+    }
+    .action-row { display: flex; gap: 5px; }
+    .action-input {
+      flex: 1;
+      border: 1px solid #D1D5DB;
+      border-radius: 5px;
+      padding: 6px 9px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      min-width: 0;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .action-input:focus {
+      border-color: #00249c; outline-color: #00249c;
+      box-shadow: 0 0 0 3px rgba(0,36,156,0.15);
+    }
+    .action-btn {
+      padding: 6px 11px;
+      border: none;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      font-family: inherit;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-add    { background: #00249c; color: #fff; }
+    .btn-add:hover:not(:disabled)    { background: #001967; }
+    .btn-remove { background: #E5E7EB; color: #374151; }
+    .btn-remove:hover:not(:disabled) { background: #D1D5DB; }
+    .action-result {
+      font-size: 11px;
+      line-height: 1.45;
+      padding: 5px 8px;
+      border-radius: 4px;
+      display: none;
+    }
+    .action-result.success { display:block; background:#ECFDF5; color:#065F46; border:1px solid #A7F3D0; }
+    .action-result.error   { display:block; background:#FEF2F2; color:#991B1B; border:1px solid #FECACA; }
+    .card-divider { height: 1px; background: #F0F2F5; }
+
+    /* Chat panel */
+    .chat-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: #F9FAFB;
+    }
+    .chat-panel-header {
+      padding: 12px 18px;
+      background: #fff;
+      border-bottom: 1px solid #E1E5EA;
+      font-size: 13px;
+      font-weight: 600;
+      color: #374151;
+      flex-shrink: 0;
+    }
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 18px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #9CA3AF;
+      gap: 8px;
+      text-align: center;
+      pointer-events: none;
+    }
+    .empty-icon { font-size: 28px; opacity: 0.4; }
+    .empty-text { font-size: 12px; }
+    .message { display: flex; gap: 7px; max-width: 84%; }
+    .message.user      { align-self: flex-end;   flex-direction: row-reverse; }
+    .message.assistant { align-self: flex-start; }
+    .msg-avatar {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700;
+      flex-shrink: 0; margin-top: 2px;
+    }
+    .message.user .msg-avatar      { background: #00249c; color: #fff; }
+    .message.assistant .msg-avatar { background: #001967; color: #fff; }
+    .msg-bubble {
+      padding: 9px 13px;
+      border-radius: 13px;
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+    .message.user .msg-bubble {
+      background: #00249c; color: #fff;
+      border-bottom-right-radius: 3px;
+    }
+    .message.assistant .msg-bubble {
+      background: #fff; color: #1F2937;
+      border: 1px solid #E1E5EA;
+      border-bottom-left-radius: 3px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .typing-row {
+      display: none;
+      align-self: flex-start;
+      padding: 9px 14px;
+      background: #fff;
+      border: 1px solid #E1E5EA;
+      border-radius: 13px;
+      border-bottom-left-radius: 3px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      gap: 4px; align-items: center;
+    }
+    .typing-row.visible { display: flex; }
+    .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #9CA3AF;
+      animation: bounce 1.2s infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%,60%,100% { opacity:0.3; transform:translateY(0); }
+      30%          { opacity:1;   transform:translateY(-4px); }
+    }
+    .chat-input-bar {
+      padding: 12px 18px;
+      background: #fff;
+      border-top: 1px solid #E1E5EA;
+      display: flex;
+      gap: 9px;
+      flex-shrink: 0;
+    }
+    .chat-textarea {
+      flex: 1;
+      border: 1px solid #D1D5DB;
+      border-radius: 7px;
+      padding: 9px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      resize: none;
+      height: 40px;
+      line-height: 1.4;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .chat-textarea:focus { border-color: #00249c; outline-color: #00249c; box-shadow: 0 0 0 3px rgba(0,36,156,0.15); }
+    .send-btn {
+      background: #00249c; color: #fff;
+      border: none; border-radius: 7px;
+      padding: 0 20px;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer; font-family: inherit;
+      transition: background 0.15s;
+    }
+    .send-btn:hover:not(:disabled) { background: #001967; }
+    .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-logo">
+    <img src="https://www.northropgrumman.com/images/NGC-logo-white-on-clear.webp" alt="Northrop Grumman">
+    <div class="header-logo-divider"></div>
+    <span class="header-logo-app">Group Access Manager</span>
+  </div>
+  <div class="header-right">
+    <span class="header-user" id="header-user"></span>
+    <a class="logout-btn" href="/logout">Sign out</a>
+  </div>
+</header>
+
+<div class="root-layout">
+
+  <!-- ══ LEFT: Group Management App ════════════════════════ -->
+  <div class="app-wrapper">
+
+    <!-- Group cards sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-label">Your Groups</div>
+      <div id="groups-container"></div>
+    </aside>
+
+    <!-- Chat panel -->
+    <section class="chat-panel">
+      <div class="chat-panel-header">Group Manager Assistant</div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-icon">💬</div>
+          <div class="empty-text">Ask me anything about your groups</div>
+        </div>
+      </div>
+      <div class="typing-row" id="typing-row">
+        <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      </div>
+      <div class="chat-input-bar">
+        <textarea class="chat-textarea" id="chat-input"
+          placeholder="Ask me to add or remove users, list members…"></textarea>
+        <button class="send-btn" id="send-btn" onclick="sendMessage()">Send</button>
+      </div>
+    </section>
+
+  </div><!-- /.app-wrapper -->
+
+  <!-- ══ RIGHT: Auth & Token Log ═════════════════════════════ -->
+  <aside class="auth-log">
+    <div class="auth-log-header">
+      <div class="log-indicator"></div>
+      <span class="auth-log-header-title">Auth &amp; Token Log</span>
+    </div>
+    <div class="auth-log-body" id="log-body"></div>
+  </aside>
+
+</div><!-- /.root-layout -->
+
+<script>
+  /* ── State ──────────────────────────────────────────────── */
+  let userInitial = 'U';
+  let currentGroups = [];   // tracks rendered group list for diff detection
+
+  /* ── Boot ───────────────────────────────────────────────── */
+  async function init() {
+    const isFresh = new URLSearchParams(location.search).has('fresh');
+    if (isFresh) history.replaceState({}, '', '/');   // clean URL
+
+    const res = await fetch('/api/me');
+    if (res.status === 401) { location = '/login'; return; }
+    const data = await res.json();
+
+    document.getElementById('header-user').textContent = data.name || data.email;
+    userInitial = (data.name || data.email).charAt(0).toUpperCase();
+    currentGroups = data.groups || [];
+    renderGroups(currentGroups);
+
+    // Poll Okta for ownership changes every 15 s
+    setInterval(async () => {
+      try {
+        const r = await fetch('/api/me');
+        if (!r.ok) return;
+        const d = await r.json();
+        const fresh = d.groups || [];
+        const added   = fresh.filter(g => !currentGroups.includes(g));
+        const removed = currentGroups.filter(g => !fresh.includes(g));
+        if (added.length || removed.length) {
+          currentGroups = fresh;
+          renderGroups(fresh);
+          logEvent('auth', 'OWNERSHIP', `Group ownership refreshed — ${fresh.length} group(s) detected`);
+          if (added.length)   logEvent('auth', 'GRANTED',  `New: ${added.join(', ')}`);
+          if (removed.length) logEvent('auth', 'REVOKED',  `Removed: ${removed.join(', ')}`);
+        }
+      } catch { /* silent — network blip */ }
+    }, 15000);
+
+    if (isFresh) {
+      logEvent('info', 'SESSION', 'OIDC authentication complete — session established');
+    } else {
+      logEvent('info', 'SESSION', 'Session resumed');
+    }
+    await fetchAndLogTokens();
+    if (currentGroups.length) {
+      logEvent('auth', 'OWNERSHIP', `Okta ownership verified — ${currentGroups.length} group(s): ${currentGroups.join(', ')}`);
+    } else {
+      logEvent('info', 'OWNERSHIP', 'No owned groups found — add user to a <GroupName>-Owners group in Okta');
+    }
+  }
+
+  /* ── Token fetch & display ──────────────────────────────── */
+  async function fetchAndLogTokens() {
+    const res = await fetch('/api/auth-info');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (data.id_token)     logTokenBlock('id',     data.id_token);
+    if (data.access_token) logTokenBlock('access', data.access_token);
+  }
+
+  /* ── JWT decode ─────────────────────────────────────────── */
+  function decodeJWT(token) {
+    try {
+      const seg = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      const pad = seg + '==='.slice(0, (4 - seg.length % 4) % 4);
+      return JSON.parse(atob(pad));
+    } catch { return null; }
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return '—';
+    return new Date(ts * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }
+
+  /* ── Token block renderer ───────────────────────────────── */
+  function logTokenBlock(type, rawJWT) {
+    const claims = decodeJWT(rawJWT);
+    if (!claims) return;
+
+    const isId   = type === 'id';
+    const cls    = isId ? 'id-token-block' : 'access-token-block';
+    const icon   = isId ? '🔵' : '🟢';
+    const label  = isId ? 'ID Token  (OIDC)' : 'Access Token  (OIDC)';
+
+    /* Key claims to surface */
+    let rows = [];
+    if (isId) {
+      rows = [
+        ['sub',       claims.sub       || '—'],
+        ['email',     claims.email     || '—'],
+        ['name',      claims.name      || '—'],
+        ['auth_time', fmtTime(claims.auth_time)],
+        ['iss',       claims.iss       || '—'],
+        ['exp',       fmtTime(claims.exp)],
+      ];
+    } else {
+      const scopes = Array.isArray(claims.scp) ? claims.scp.join(' ') : (claims.scp || claims.scope || '—');
+      rows = [
+        ['scp', scopes],
+        ['cid', claims.cid || claims.client_id || '—'],
+        ['sub', claims.sub || '—'],
+        ['exp', fmtTime(claims.exp)],
+      ];
+    }
+
+    const claimRows = rows.map(([k,v]) =>
+      `<div class="claim-row"><span class="claim-key">${esc(k)}:</span><span class="claim-val">${esc(String(v))}</span></div>`
+    ).join('');
+
+    const truncJWT = rawJWT.length > 80
+      ? rawJWT.slice(0,40) + '…' + rawJWT.slice(-20)
+      : rawJWT;
+
+    appendLogHTML(`
+      <div class="token-block ${cls}">
+        <div class="tb-header">${icon} ${label}</div>
+        <div class="tb-claims">
+          ${claimRows}
+          <details class="jwt-toggle">
+            <summary>▸ raw JWT</summary>
+            <pre class="jwt-raw">${esc(rawJWT)}</pre>
+          </details>
+        </div>
+      </div>`);
+  }
+
+  /* ── Event logger ───────────────────────────────────────── */
+  function ts() {
+    return new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }
+
+  function logEvent(type, badge, text) {
+    const badgeClass = {
+      auth:  'badge-auth',
+      api:   'badge-api',
+      mcp:   'badge-mcp',
+      info:  'badge-info',
+      error: 'badge-error',
+    }[type] || 'badge-info';
+
+    appendLogEntry(`
+      <div class="log-entry-head">
+        <span class="log-ts">${ts()}</span>
+        <span class="log-badge ${badgeClass}">${esc(badge)}</span>
+      </div>
+      <div class="log-entry-body">
+        <div class="log-text highlight">${esc(text)}</div>
+      </div>`);
+  }
+
+  function logApiCall(method, endpoint, payload) {
+    const payStr = payload ? JSON.stringify(payload) : '';
+    appendLogEntry(`
+      <div class="log-entry-head">
+        <span class="log-ts">${ts()}</span>
+        <span class="log-badge badge-api">API CALL</span>
+      </div>
+      <div class="log-entry-body">
+        <div class="log-text highlight">→ ${esc(method)} ${esc(endpoint)}</div>
+        ${payStr ? `<div class="log-text">${esc(payStr)}</div>` : ''}
+      </div>`);
+  }
+
+  function logApiResponse(toolsCalled, elapsed) {
+    const toolHtml = toolsCalled && toolsCalled.length
+      ? `<div class="tool-list">${toolsCalled.map(t =>
+          `<div class="tool-row">
+            <span class="tool-arrow">⇒</span>
+            <span class="tool-name">${esc(t.tool)}</span>
+            <span class="tool-time">${t.elapsed}s</span>
+          </div>`).join('')}</div>`
+      : '';
+
+    appendLogEntry(`
+      <div class="log-entry-head">
+        <span class="log-ts">${ts()}</span>
+        <span class="log-badge badge-mcp">MCP RESPONSE</span>
+      </div>
+      <div class="log-entry-body">
+        <div class="log-text highlight">← Okta MCP Server responded  (${elapsed}ms)</div>
+        ${toolHtml}
+      </div>`);
+  }
+
+  /* ── DOM helpers ────────────────────────────────────────── */
+  function appendLogEntry(innerHTML) {
+    const div = document.createElement('div');
+    div.className = 'log-entry';
+    div.innerHTML = innerHTML;
+    appendToLog(div);
+  }
+
+  function appendLogHTML(html) {
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+    appendToLog(wrapper.firstElementChild);
+  }
+
+  function appendToLog(el) {
+    const body = document.getElementById('log-body');
+    body.appendChild(el);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  /* ── Group cards ────────────────────────────────────────── */
+  function renderGroups(groups) {
+    const container = document.getElementById('groups-container');
+    if (!groups.length) {
+      container.innerHTML = `<div style="color:#9CA3AF;font-size:12px;line-height:1.6;padding:4px">
+        <strong style="color:#6B7280">No groups assigned.</strong><br>
+        To grant ownership, add this user to a<br>
+        <code style="font-size:11px;background:#E5E7EB;padding:1px 4px;border-radius:3px">&lt;GroupName&gt;-Owners</code>
+        group in Okta.
+      </div>`;
+      return;
+    }
+    container.innerHTML = groups.map(g => {
+      const id = safeId(g), js = escJs(g);
+      return `
+        <div class="group-card">
+          <div class="card-header">${esc(g)}</div>
+          <div class="card-body">
+            <div>
+              <div class="action-label">Add User</div>
+              <div class="action-row">
+                <input class="action-input" type="text" id="add-in-${id}"
+                       placeholder="Name or email"
+                       onkeydown="if(event.key==='Enter')act('add','${js}')">
+                <button class="action-btn btn-add" id="add-btn-${id}"
+                        onclick="act('add','${js}')">Add</button>
+              </div>
+              <div class="action-result" id="add-res-${id}"></div>
+            </div>
+            <div class="card-divider"></div>
+            <div>
+              <div class="action-label">Remove User</div>
+              <div class="action-row">
+                <input class="action-input" type="text" id="rem-in-${id}"
+                       placeholder="Name or email"
+                       onkeydown="if(event.key==='Enter')act('remove','${js}')">
+                <button class="action-btn btn-remove" id="rem-btn-${id}"
+                        onclick="act('remove','${js}')">Remove</button>
+              </div>
+              <div class="action-result" id="rem-res-${id}"></div>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  /* ── Add / Remove ───────────────────────────────────────── */
+  async function act(action, group) {
+    const pre   = action === 'add' ? 'add' : 'rem';
+    const id    = safeId(group);
+    const input = document.getElementById(`${pre}-in-${id}`);
+    const btn   = document.getElementById(`${pre}-btn-${id}`);
+    const resEl = document.getElementById(`${pre}-res-${id}`);
+    const query = input.value.trim();
+    if (!query) { input.focus(); return; }
+
+    btn.disabled = true;
+    btn.textContent = action === 'add' ? 'Adding…' : 'Removing…';
+    resEl.className = 'action-result';
+
+    const endpoint = `/api/groups/${encodeURIComponent(group)}/${action}`;
+    logApiCall('POST', endpoint, { user: query });
+    const t0 = Date.now();
+
+    try {
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user: query }),
+      });
+      const data = await r.json();
+      const elapsed = Date.now() - t0;
+      logApiResponse(data.tools_called, elapsed);
+
+      if (r.ok) {
+        resEl.textContent = data.result;
+        resEl.className   = 'action-result success';
+        input.value       = '';
+      } else {
+        resEl.textContent = data.detail || 'An error occurred.';
+        resEl.className   = 'action-result error';
+        logEvent('error', 'ERROR', data.detail || 'API error');
+      }
+    } catch (e) {
+      resEl.textContent = 'Connection error.';
+      resEl.className   = 'action-result error';
+      logEvent('error', 'ERROR', 'Connection error: ' + e.message);
+    }
+
+    btn.disabled    = false;
+    btn.textContent = action === 'add' ? 'Add' : 'Remove';
+    setTimeout(() => { resEl.className = 'action-result'; resEl.textContent = ''; }, 9000);
+  }
+
+  /* ── Chat ───────────────────────────────────────────────── */
+  function addChatMessage(role, text) {
+    const container = document.getElementById('chat-messages');
+    document.getElementById('empty-state')?.remove();
+    const div = document.createElement('div');
+    div.className = `message ${role}`;
+    div.innerHTML = `
+      <div class="msg-avatar">${role === 'user' ? userInitial : 'AI'}</div>
+      <div class="msg-bubble">${esc(text)}</div>`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  async function sendMessage() {
+    const input  = document.getElementById('chat-input');
+    const btn    = document.getElementById('send-btn');
+    const typing = document.getElementById('typing-row');
+    const msg    = input.value.trim();
+    if (!msg) return;
+
+    input.value  = '';
+    btn.disabled = true;
+    addChatMessage('user', msg);
+    typing.className = 'typing-row visible';
+    document.getElementById('chat-messages').scrollTop = 99999;
+
+    logApiCall('POST', '/api/chat', { message: msg });
+    const t0 = Date.now();
+
+    try {
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      });
+      const data   = await r.json();
+      const elapsed = Date.now() - t0;
+      typing.className = 'typing-row';
+      logApiResponse(data.tools_called, elapsed);
+      addChatMessage('assistant', r.ok ? data.result : 'An error occurred.');
+    } catch (e) {
+      typing.className = 'typing-row';
+      logEvent('error', 'ERROR', 'Connection error: ' + e.message);
+      addChatMessage('assistant', 'Connection error. Please try again.');
+    }
+
+    btn.disabled = false;
+    input.focus();
+  }
+
+  /* ── Helpers ────────────────────────────────────────────── */
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function escJs(s)  { return s.replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+  function safeId(s) { return s.replace(/[^a-zA-Z0-9]/g,'-'); }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('chat-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+  });
+
+  init();
+</script>
+</body>
+</html>

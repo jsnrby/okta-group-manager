@@ -1,11 +1,9 @@
 import os
+import time
 import anthropic
-import chainlit as cl
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-# Tools the agent is allowed to use — all others are filtered out even if the
-# MCP server exposes them.
 ALLOWED_TOOLS = {
     "list_users",
     "get_user",
@@ -21,11 +19,14 @@ MAX_TOKENS = 4096
 
 
 class OktaGroupAgent:
-    def __init__(self, user_email: str, owned_groups: list[str]):
+    def __init__(self, user_email: str, owned_groups: list[str], history: list | None = None):
         self.user_email = user_email
         self.owned_groups = owned_groups
-        self.anthropic_client = anthropic.Anthropic()
-        self.conversation_history: list[dict] = []
+        self.anthropic_client = anthropic.Anthropic(
+            base_url="https://api.anthropic.com",
+        )
+        self.conversation_history: list[dict] = list(history) if history else []
+        self.tools_called: list[dict] = []
 
     def _system_prompt(self) -> str:
         groups = "\n".join(f"- {g}" for g in self.owned_groups) or "(none)"
@@ -38,9 +39,11 @@ AUTHORIZED GROUPS (you may ONLY operate on these):
 
 RULES:
 1. Never add, remove, or inspect members of groups not listed above.
-2. If asked about an unauthorized group, decline and list the groups you can manage.
-3. Before executing an add/remove, state clearly what you are about to do and ask for confirmation if the user hasn't already confirmed.
-4. Be concise and helpful. Use the user's first name if available.
+2. If asked to operate on a group not in the authorized list, respond with exactly:
+   "You are not authorized to manage members of the <group name> Group. You can manage these Groups:
+   <list each authorized group on its own line>"
+3. Before executing an add/remove, confirm what you are about to do if the user hasn't already confirmed.
+4. Be concise and helpful.
 
 CAPABILITIES:
 - Look up users by name or email
@@ -117,11 +120,15 @@ CAPABILITIES:
                         for block in response.content:
                             if block.type != "tool_use":
                                 continue
-                            async with cl.Step(name=block.name, type="tool") as step:
-                                step.input = block.input
-                                result = await session.call_tool(block.name, block.input)
-                                result_text = self._extract_text(result.content)
-                                step.output = result_text
+                            t0 = time.monotonic()
+                            result = await session.call_tool(block.name, block.input)
+                            elapsed = round(time.monotonic() - t0, 2)
+                            result_text = self._extract_text(result.content)
+                            self.tools_called.append({
+                                "tool": block.name,
+                                "elapsed": elapsed,
+                                "success": not getattr(result, "isError", False),
+                            })
                             tool_results.append(
                                 {
                                     "type": "tool_result",
@@ -133,5 +140,4 @@ CAPABILITIES:
                         messages.append({"role": "user", "content": tool_results})
                         continue
 
-                    # Unexpected stop reason
-                    return "Unexpected response from the model. Please try again."
+                    return "Unexpected response. Please try again."
