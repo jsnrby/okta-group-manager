@@ -1,0 +1,28 @@
+[project]
+# Name shown in the UI header
+name = "Okta Group Manager"
+
+# Disable telemetry
+enable_telemetry = false
+
+# Allow users to expand the sources of a message
+expand_messages = false
+
+# Hide the chain of thought
+hide_cot = false
+
+[features]
+# Disable the prompt playground (not needed for this app)
+prompt_playground = false
+
+# Enable speech-to-text
+speech_to_text = { enabled = false }
+
+[UI]
+name = "Okta Group Manager"
+description = "Manage your Okta groups with AI assistance"
+default_collapse_content = true
+hide_cot = false
+
+[meta]
+generated_by = "1.3.0"
