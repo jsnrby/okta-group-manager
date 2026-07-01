@@ -192,6 +192,123 @@ The app's own ownership-check token (②) is intentionally read-only. Even if `a
 
 ---
 
+## 5. Full detailed flow — App, both Okta App Integrations, Authorization Server, and MCP Server
+
+The most granular view: names both Okta app integrations explicitly (OIDC Web App vs. API Services/MCP App), and walks a concrete worked example (Alex Rivera adding a user to `AWSDEV-1000-Operator`) through every hop, including the 403 short-circuit and the MCP server's independent token exchange.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Alex as Alex Rivera (Group Owner)
+    participant Browser as Browser (SPA)
+    participant App as FastAPI App (Backend)
+    participant OIDCApp as Okta OIDC App<br/>(Web App Integration)
+    participant Okta as Okta Authorization Server<br/>(ic-demo.okta.com)
+    participant MCPApp as Okta API Services App<br/>(MCP Server Integration)
+    participant MCP as Okta MCP Server<br/>(local subprocess)
+
+    Note over Alex,MCP: PHASE 1 — Human Authentication (OIDC Authorization Code Flow)
+
+    Alex->>Browser: Open app
+    Browser->>App: GET /
+    App-->>Browser: 302 -> /login (no session cookie)
+    Browser->>App: GET /login
+    App->>OIDCApp: authorize_redirect()<br/>client_id=OAUTH_OKTA_CLIENT_ID<br/>redirect_uri=/auth/callback<br/>scope="openid email profile"<br/>response_type=code
+    OIDCApp->>Okta: Resolve app config (client_id, redirect_uris)
+    Okta-->>Browser: 302 -> Okta Hosted Sign-In Page
+    Browser->>Okta: GET /login/login.htm
+    Okta-->>Browser: Render login form
+    Alex->>Browser: Enter credentials (+ MFA if required)
+    Browser->>Okta: POST credentials
+    Okta->>Okta: Validate credentials + evaluate<br/>Sign-On Policy for OIDC App
+    Okta-->>Browser: 302 -> /auth/callback?code=AUTH_CODE&state=...
+    Browser->>App: GET /auth/callback?code=AUTH_CODE
+
+    Note over App,Okta: PHASE 2 — Authorization Code Exchange (confidential client)
+
+    App->>Okta: POST /oauth2/default/v1/token<br/>grant_type=authorization_code<br/>code=AUTH_CODE<br/>client_id + client_secret
+    Okta->>OIDCApp: Verify client_secret against OIDC App registration
+    Okta-->>App: 200 OK { id_token, access_token, expires_in }
+    Note right of Okta: ID TOKEN claims:<br/>iss=.../oauth2/default  aud=OAUTH_OKTA_CLIENT_ID<br/>sub=Alex's Okta user ID<br/>email=alex.rivera@atko.email<br/>name, auth_time, iat, exp<br/><br/>ACCESS TOKEN claims:<br/>iss, sub=cid=OAUTH_OKTA_CLIENT_ID<br/>scp=[openid, email, profile]  exp
+
+    App->>App: Create session_id (UUID)<br/>store {id_token, access_token} server-side<br/>set signed session cookie
+    App-->>Browser: 302 -> / (+ session cookie)
+    Browser->>App: GET / (cookie attached)
+    App-->>Browser: 200 index.html (SPA)
+
+    Note over Alex,MCP: PHASE 3 — Authorization Check: Is Alex an Owner? (on load + every 15s)
+
+    Browser->>App: GET /api/me (cookie)
+    App->>App: get_owned_groups(alex.rivera@atko.email)
+    App->>App: Check cached client_credentials token (expires in > 60s?)
+
+    alt Token expired or not cached
+        App->>MCPApp: Build RS256 JWT assertion<br/>iss=sub=OKTA_MCP_CLIENT_ID, aud=token endpoint, kid=OKTA_KEY_ID
+        App->>Okta: POST /oauth2/v1/token<br/>grant_type=client_credentials<br/>client_assertion_type=jwt-bearer<br/>client_assertion=&lt;signed JWT&gt;<br/>scope="okta.users.read okta.groups.read"
+        Okta->>MCPApp: Verify JWT signature vs registered public key (kid match)
+        Okta-->>App: 200 OK { access_token, expires_in }
+        Note right of Okta: ACCESS TOKEN claims:<br/>iss=https://ic-demo.okta.com<br/>sub=cid=OKTA_MCP_CLIENT_ID<br/>scp=[okta.users.read, okta.groups.read]<br/>READ-ONLY — no okta.groups.manage  exp
+    end
+
+    App->>Okta: GET /api/v1/users/alex.rivera@atko.email<br/>Authorization: Bearer &lt;read-only token&gt;
+    Okta-->>App: 200 OK { id: "00u249j3...", profile }
+    App->>Okta: GET /api/v1/groups/{AWSDEV-1000-Operator id}/owners<br/>Authorization: Bearer &lt;read-only token&gt;
+    Okta-->>App: 200 OK [ { id: "00u249j3..." } ]
+    App->>App: user.id found in owners list -> OWNED
+    App-->>Browser: 200 { email, name, groups:["AWSDEV-1000-Operator"] }
+    Browser->>Browser: Render "AWSDEV-1000-Operator" group card
+
+    Note over Alex,MCP: PHASE 4 — Authorized Action: Add User to Owned Group
+
+    Alex->>Browser: "Add jane.doe to AWSDEV-1000-Operator"<br/>(chat or Add-User button)
+    Browser->>App: POST /api/groups/AWSDEV-1000-Operator/add<br/>{ user:"jane.doe" }  (cookie)
+    App->>App: get_owned_groups(alex) again;<br/>assert group in owned list
+    alt Not authorized
+        App-->>Browser: 403 "You are not authorized to manage<br/>members of the {group} Group."
+    end
+
+    App->>MCP: Spawn subprocess `uv run okta-mcp-server` (stdio)<br/>env: OKTA_CLIENT_ID, OKTA_PRIVATE_KEY, OKTA_KEY_ID, OKTA_SCOPES
+
+    Note over MCP,MCPApp: PHASE 5 — MCP Server's OWN Authentication (independent token)
+
+    MCP->>MCP: Build its own RS256 JWT assertion<br/>(separate token cache from App's)
+    MCP->>Okta: POST /oauth2/v1/token<br/>grant_type=client_credentials<br/>client_assertion_type=jwt-bearer<br/>scope="okta.users.read okta.groups.read okta.groups.manage"
+    Okta->>MCPApp: Verify JWT signature<br/>(same App Services App + key pair as Phase 3, wider scope requested)
+    Okta-->>MCP: 200 OK { access_token, expires_in }
+    Note right of Okta: ACCESS TOKEN claims:<br/>iss=https://ic-demo.okta.com<br/>sub=cid=OKTA_MCP_CLIENT_ID<br/>scp=[okta.users.read, okta.groups.read,<br/>okta.groups.manage] <-- WRITE scope  exp
+
+    MCP->>MCP: scope_guard: prune tool registry to<br/>tools covered by granted scopes<br/>(13 of 107 tools enabled)
+    App->>MCP: initialize() + list_tools()
+    MCP-->>App: [list_users, get_user, list_groups, get_group,<br/>list_group_users, add_user_to_group,<br/>remove_user_from_group]<br/>(further filtered by app's ALLOWED_TOOLS)
+
+    Note over App,MCP: PHASE 6 — Claude Tool-Calling Loop
+
+    App->>App: Claude (Anthropic API): messages.create(system_prompt, tools, history)
+    App-->>App: Claude decides: tool_use "list_users"
+    App->>MCP: call_tool("list_users", {q:"jane.doe"})
+    MCP->>Okta: GET /api/v1/users?q=jane.doe<br/>Authorization: Bearer &lt;write-scoped token&gt;
+    Okta-->>MCP: 200 OK [ { id, profile:{email:jane.doe@...} } ]
+    MCP-->>App: tool_result: user found
+
+    App->>App: Claude decides: tool_use "add_user_to_group"
+    App->>MCP: call_tool("add_user_to_group", {userId, groupId})
+    MCP->>Okta: PUT /api/v1/groups/{groupId}/users/{userId}<br/>Authorization: Bearer &lt;write-scoped token&gt;
+    Okta->>Okta: Verify token scope includes okta.groups.manage -> ALLOW
+    Okta-->>MCP: 204 No Content
+    MCP-->>App: tool_result: success
+
+    App->>App: Claude: end_turn<br/>"Added jane.doe@... to AWSDEV-1000-Operator."
+    App-->>Browser: 200 { result, tools_called }
+    Browser-->>Alex: Render chat bubble + log entries in Auth & Token Log panel
+```
+
+**Structural notes:**
+- Two distinct token endpoints are used: `/oauth2/default/v1/token` for the human OIDC flow vs. the org-level `/oauth2/v1/token` for both `client_credentials` exchanges.
+- `MCPApp` (the API Services App) is hit twice, independently, by two different callers — the App's `OktaClient` and the MCP subprocess — using the same credentials but requesting different scopes, producing two different tokens with different capabilities.
+- The two `alt` blocks are the two authorization gates in this flow: the read-only ownership check (Phase 3) and the 403 short-circuit that happens *before* the MCP subprocess is ever spawned (Phase 4) — an unauthorized request never reaches Okta's write API at all.
+
+---
+
 ## Key design points
 
 - **No ownership data lives in the app.** `config/group_owners.yaml` was removed; `app/okta_client.py` reads Okta's native group Owners list on every request. Changing owners in the Admin Console takes effect within one poll cycle (≤15s), no restart needed.
