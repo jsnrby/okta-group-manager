@@ -199,7 +199,20 @@
       color: #79C0FF;
       display: flex;
       align-items: center;
+      justify-content: space-between;
       gap: 6px;
+    }
+    .id-token-block .tb-issuer {
+      font-size: 9px;
+      font-weight: 500;
+      text-transform: none;
+      letter-spacing: 0;
+      color: #58A6FF99;
+      max-width: 55%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: 'SF Mono', 'Fira Code', monospace;
     }
     .id-token-block .tb-claims { padding: 7px 10px; display: flex; flex-direction: column; gap: 3px; }
     .id-token-block .claim-key   { color: #58A6FF; }
@@ -221,7 +234,20 @@
       color: #56D364;
       display: flex;
       align-items: center;
+      justify-content: space-between;
       gap: 6px;
+    }
+    .access-token-block .tb-issuer {
+      font-size: 9px;
+      font-weight: 500;
+      text-transform: none;
+      letter-spacing: 0;
+      color: #3FB95099;
+      max-width: 55%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: 'SF Mono', 'Fira Code', monospace;
     }
     .access-token-block .tb-claims { padding: 7px 10px; display: flex; flex-direction: column; gap: 3px; }
     .access-token-block .claim-key { color: #3FB950; }
@@ -631,25 +657,30 @@
     const isId   = type === 'id';
     const cls    = isId ? 'id-token-block' : 'access-token-block';
     const icon   = isId ? '🔵' : '🟢';
-    const label  = isId ? 'ID Token  (OIDC)' : 'Access Token  (OIDC)';
+    const label  = isId ? 'Authentication — ID Token' : 'Authorization — Access Token';
 
-    /* Key claims to surface */
+    /* Key claims to surface, including issuer and scopes on both */
     let rows = [];
     if (isId) {
       rows = [
+        ['iss',       claims.iss       || '—'],
         ['sub',       claims.sub       || '—'],
+        ['aud',       claims.aud       || '—'],
         ['email',     claims.email     || '—'],
         ['name',      claims.name      || '—'],
         ['auth_time', fmtTime(claims.auth_time)],
-        ['iss',       claims.iss       || '—'],
+        ['iat',       fmtTime(claims.iat)],
         ['exp',       fmtTime(claims.exp)],
       ];
     } else {
       const scopes = Array.isArray(claims.scp) ? claims.scp.join(' ') : (claims.scp || claims.scope || '—');
       rows = [
-        ['scp', scopes],
-        ['cid', claims.cid || claims.client_id || '—'],
+        ['iss', claims.iss || '—'],
         ['sub', claims.sub || '—'],
+        ['aud', claims.aud || '—'],
+        ['cid', claims.cid || claims.client_id || '—'],
+        ['scp', scopes],
+        ['iat', fmtTime(claims.iat)],
         ['exp', fmtTime(claims.exp)],
       ];
     }
@@ -662,9 +693,14 @@
       ? rawJWT.slice(0,40) + '…' + rawJWT.slice(-20)
       : rawJWT;
 
+    const issuer = claims.iss || '—';
+
     appendLogHTML(`
       <div class="token-block ${cls}">
-        <div class="tb-header">${icon} ${label}</div>
+        <div class="tb-header">
+          <span>${icon} ${label}</span>
+          <span class="tb-issuer" title="${esc(issuer)}">${esc(issuer)}</span>
+        </div>
         <div class="tb-claims">
           ${claimRows}
           <details class="jwt-toggle">

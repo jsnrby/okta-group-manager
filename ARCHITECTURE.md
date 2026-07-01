@@ -130,6 +130,68 @@ sequenceDiagram
 
 ---
 
+## 4. Combined auth flow — App ↔ Okta ↔ MCP Server (scopes & claims)
+
+This consolidates flows 1–3 into a single sequence, annotated with the exact scopes requested and the claims each token carries. Three distinct tokens are in play, each with a different audience and purpose.
+
+```mermaid
+sequenceDiagram
+    participant U as Browser
+    participant App as FastAPI App
+    participant OC as OktaClient
+    participant Agent as OktaGroupAgent
+    participant MCP as Okta MCP Server
+    participant Okta as Okta (ic-demo.okta.com)
+
+    rect rgb(20,30,55)
+    Note over U,Okta: ① Human login — OIDC Web App (Authorization Code)
+    U->>App: GET /login
+    App->>Okta: authorize_redirect\nscope=openid email profile
+    Okta-->>U: hosted login page
+    U->>Okta: credentials
+    Okta-->>App: 302 /auth/callback?code=...
+    App->>Okta: POST /oauth2/default/v1/token\ngrant_type=authorization_code
+    Okta-->>App: id_token + access_token
+    Note right of Okta: ID Token claims:\niss = https://ic-demo.okta.com/oauth2/default\naud = OAUTH_OKTA_CLIENT_ID\nsub = Okta user id\nemail, name, auth_time, iat, exp\n\nAccess Token claims:\niss, sub, cid = OAUTH_OKTA_CLIENT_ID\nscp = [openid, email, profile]\nexp
+    App->>App: store tokens in session,\nnever forwarded to MCP or Claude
+    end
+
+    rect rgb(20,45,30)
+    Note over App,Okta: ② Backend → Okta Management API — API Services App (client_credentials)
+    OC->>OC: build RS256 JWT\niss=sub=OKTA_MCP_CLIENT_ID, aud=token endpoint, kid=OKTA_KEY_ID
+    OC->>Okta: POST /oauth2/v1/token\ngrant_type=client_credentials\nclient_assertion_type=jwt-bearer\nscope=okta.users.read okta.groups.read
+    Okta-->>OC: access_token
+    Note right of Okta: Access Token claims:\niss = https://ic-demo.okta.com\nsub = cid = OKTA_MCP_CLIENT_ID (no human "sub")\nscp = [okta.users.read, okta.groups.read]\nexp (cached client-side until exp-60s)
+    OC->>Okta: GET /api/v1/users/{email}\nGET /api/v1/groups/{id}/owners
+    Okta-->>OC: user id + owners list
+    end
+
+    rect rgb(55,40,15)
+    Note over Agent,Okta: ③ MCP Server → Okta Management API — same API Services App, wider scope
+    Agent->>MCP: spawn subprocess\nenv: OKTA_CLIENT_ID, OKTA_PRIVATE_KEY, OKTA_KEY_ID,\nOKTA_SCOPES=okta.users.read okta.groups.read okta.groups.manage
+    MCP->>MCP: build its own RS256 JWT\n(independent of OC — separate token cache)
+    MCP->>Okta: POST /oauth2/v1/token\ngrant_type=client_credentials\nscope=okta.users.read okta.groups.read okta.groups.manage
+    Okta-->>MCP: access_token
+    Note right of Okta: Access Token claims:\niss = https://ic-demo.okta.com\nsub = cid = OKTA_MCP_CLIENT_ID\nscp = [okta.users.read, okta.groups.read, okta.groups.manage]\n→ okta.groups.manage is the write scope;\n  absent from OC's token in step ②
+    MCP->>MCP: prune tool registry to only\ntools covered by granted scopes
+    Agent->>MCP: call_tool("add_user_to_group", {...})
+    MCP->>Okta: PUT /api/v1/groups/{groupId}/users/{userId}\nAuthorization: Bearer <MCP's token>
+    Okta-->>MCP: 204 No Content
+    end
+```
+
+**Why three separate tokens, not one:**
+
+| Token | Issued to | Scopes | Used for |
+|---|---|---|---|
+| ID Token (①) | Human user | `openid email profile` | Proving identity to the app; displayed read-only in the UI |
+| OktaClient access token (②) | API Services App | `okta.users.read`, `okta.groups.read` | Read-only ownership checks — deliberately excludes `okta.groups.manage` |
+| MCP Server access token (③) | Same API Services App | `okta.users.read`, `okta.groups.read`, `okta.groups.manage` | The only token capable of writing group membership |
+
+The app's own ownership-check token (②) is intentionally read-only. Even if `app/okta_client.py` had a bug, it has no `okta.groups.manage` scope and physically cannot mutate a group — only the MCP subprocess's token (③) can, and it's invoked exclusively through the tool-calling loop, one Claude decision at a time.
+
+---
+
 ## Key design points
 
 - **No ownership data lives in the app.** `config/group_owners.yaml` was removed; `app/okta_client.py` reads Okta's native group Owners list on every request. Changing owners in the Admin Console takes effect within one poll cycle (≤15s), no restart needed.
